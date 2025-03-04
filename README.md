@@ -54,7 +54,7 @@ tiktok_scrapes/
 ### **`scrape_user_profile(username)`**
 Scrapes a TikTok user's profile, extracting bio, contact info, and links.
 
-### **`enhanced_scrape_comments(post_url, max_comments=50)`**
+### **`scrape_comments(post_url, max_comments=50)`**
 Extracts comments from a TikTok post, handling nested replies and parent comments.
 
 ### **`scrape_hashtag(hashtag, max_posts=10, batch_size=3)`**
