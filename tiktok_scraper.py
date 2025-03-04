@@ -155,7 +155,7 @@ class TikTokScraper:
             logger.error(f"Error scraping profile for {username}: {str(e)}", exc_info=True)
             return None
 
-    def enhanced_scrape_comments(self, post_url, max_comments=50):
+    def scrape_comments(self, post_url, max_comments=50):
         """
         Scrapes comments from a TikTok post using updated selectors.
         Monitors URL changes while scrolling to detect navigation away from the post.
@@ -343,7 +343,7 @@ class TikTokScraper:
             video_urls = []
             last_height = self.driver.execute_script("return document.body.scrollHeight")
             scroll_attempts = 0
-            max_scroll_attempts = 20  # Prevent infinite scrolling
+            max_scroll_attempts = 100  # Prevent infinite scrolling
             
             while len(video_urls) < max_posts and scroll_attempts < max_scroll_attempts:
                 # Find all video links on current page
@@ -360,7 +360,7 @@ class TikTokScraper:
                             video_url = elem.get_attribute('href')
                             if video_url and video_url not in processed_urls:
                                 video_urls.append(video_url)
-                                logger.info(f"Found video URL: {video_url}")
+                                logger.info(f"Found video URL: {video_url}, Total found: {len(video_urls)}")
                                 if len(video_urls) >= max_posts:
                                     break
                         except Exception as e:
@@ -398,7 +398,7 @@ class TikTokScraper:
                         logger.info(f"Processing video: {video_url}")
                         
                         # Get comments for this video
-                        comments = self.enhanced_scrape_comments(video_url)
+                        comments = self.scrape_comments(video_url)
                         logger.info(f"Found {len(comments)} comments")
                         
                         # Extract username from URL or first comment
@@ -470,108 +470,6 @@ class TikTokScraper:
                 self.save_to_csv(all_results, f"tiktok_data_{hashtag}_error_recovery.csv")
                 logger.info(f"Saved {len(all_results)} results before error")
             return all_results
-
-    def search_hashtag(self, hashtag, max_videos=5):
-        """
-        Searches for videos with a specific hashtag and collects their URLs.
-        
-        Args:
-            hashtag (str): The hashtag to search for (without the # symbol)
-            max_videos (int): Maximum number of videos to collect
-            
-        Returns:
-            list: List of video URLs
-        """
-        logger.info(f"Searching for videos with hashtag: {hashtag}")
-        video_urls = []
-        try:
-            # Navigate to hashtag page
-            url = f"https://www.tiktok.com/tag/{hashtag}"
-            self.driver.get(url)
-            time.sleep(3)  # Wait for content to load
-
-            # Wait for video elements to be present
-            self.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '[data-e2e="challenge-item-list"] a'))
-            )
-
-            last_height = self.driver.execute_script("return document.body.scrollHeight")
-            
-            while len(video_urls) < max_videos:
-                # Find all video links
-                video_elements = self.driver.find_elements(By.CSS_SELECTOR, '[data-e2e="challenge-item-list"] a')
-                
-                # Add new video URLs to the list
-                for element in video_elements:
-                    video_url = element.get_attribute('href')
-                    if video_url and video_url not in video_urls:
-                        video_urls.append(video_url)
-                        logger.info(f"Found video URL: {video_url}")
-                        if len(video_urls) >= max_videos:
-                            break
-                
-                # Scroll down to load more videos
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)  # Wait for new content to load
-                
-                # Check if we've reached the bottom of the page
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    break
-                last_height = new_height
-
-            logger.info(f"Collected {len(video_urls)} video URLs for hashtag #{hashtag}")
-            return video_urls[:max_videos]  # Ensure we don't return more than max_videos
-
-        except Exception as e:
-            logger.error(f"Error searching hashtag #{hashtag}: {str(e)}", exc_info=True)
-            return video_urls
-
-    def process_multiple_videos(self, video_urls):
-        """
-        Process multiple videos by scraping comments and profile information for each video.
-        
-        Args:
-            video_urls (list): List of video URLs to process
-            
-        Returns:
-            list: List of dictionaries containing video data, comments, and profile information
-        """
-        results = []
-        for url in video_urls:
-            try:
-                logger.info(f"Processing video: {url}")
-                
-                # Get video ID or username from URL
-                # You might need to adjust this depending on TikTok's URL format
-                video_data = {
-                    'url': url,
-                    'comments': [],
-                    'profile_info': None
-                }
-                
-                # Scrape comments for this video
-                comments = self.enhanced_scrape_comments(url)
-                video_data['comments'] = comments
-                
-                # Get username from the first comment or URL
-                username = None
-                if comments and len(comments) > 0:
-                    username = comments[0].get('username')
-                
-                # If we found a username, scrape the profile
-                if username:
-                    profile_info = self.scrape_user_profile(username)
-                    video_data['profile_info'] = profile_info
-                
-                results.append(video_data)
-                logger.info(f"Successfully processed video: {url}")
-                
-            except Exception as e:
-                logger.error(f"Error processing video {url}: {str(e)}", exc_info=True)
-                continue
-                
-        return results
 
     def save_to_csv(self, data, filename="tiktok_data.csv"):
         """
