@@ -1,79 +1,88 @@
 # TikTok Scraper
 
-## Overview
-This project is a **TikTok Scraper** built using Python and Selenium. It allows users to scrape TikTok user profiles, post comments, and hashtag-based posts efficiently. The scraped data is stored in structured folders for better organization.
+This project automates the process of logging into TikTok, extracting user profile URLs, and saving the data into a CSV file.
 
-## Features
-✅ Scrapes TikTok user profiles for bio, contact details (email, WhatsApp, phone), and links.  
-✅ Extracts comments from TikTok posts, including replies and user details.  
-✅ Collects posts based on hashtags, scraping both post details and comments.  
-✅ Saves all extracted data into structured folders based on hashtags with timestamped CSV files.
+## Installation and Setup
 
-## Installation
 ### Prerequisites
-- Python 3.x
-- Google Chrome installed
-- ChromeDriver (managed by `webdriver-manager`)
 
-### Install Dependencies
-Run the following command to install required dependencies:
-```bash
-pip install selenium webdriver-manager beautifulsoup4
+Ensure you have Python installed along with the required dependencies.
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/your-repo/tiktok-scraper.git
+   cd tiktok-scraper
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Configure your TikTok credentials by creating a `.env` file (refer to `.env.example`):
+   ```env
+   TIKTOK_ACCOUNT="your_tiktok_email"
+   TIKTOK_PASSWORD="your_tiktok_password"
+   ```
+
+## Code Structure
+
+```
+/tiktok_scraper
+│── main.py               # Main entry script
+│── login.py              # Handles TikTok login authentication
+│── scrape_url_lists.py   # Extracts user profile URLs
+│── tiktok_scraper.py     # Scrapes TikTok profile data
+│── helper.py             # Utility functions for processing data
+│── .env.example          # Example environment file with credentials
+│── README.md             # Project documentation
+│── requirements.txt      # Required Python packages
 ```
 
-## Usage
-### Running the Scraper
-To start scraping TikTok data, run:
+## Workflow
+
+The process is orchestrated in `main.py`, which follows these steps:
+
+1. **Login to TikTok:** Uses `login.py` to authenticate using the credentials provided in the `.env` file.
+2. **Scrape Video URLs:** Extracts a list of video URLs related to the hastag and stored.
+3. **Scrape Comments Data:** Extract the comments for each video
+4. **Scrape User Data:** Extract each commenter's profile.
+4. **Save to CSV:** The scraped data is stored in a structured CSV file.
+
+To run the scraper, execute:
 ```bash
 python main.py
 ```
-You will be prompted to enter the hashtag and the maximum number of posts to scrape.
 
-### Expected Output Structure
-Scraped data is saved in the `tiktok_scrapes/` directory, with subdirectories for each hashtag. Example structure:
-```
-tiktok_scrapes/
-│── dancechallenge/
-│   ├── tiktok_data_dancechallenge_20250303_120102.csv
-│   ├── tiktok_data_dancechallenge_20250304_130504.csv
-│── funnyvideos/
-│   ├── tiktok_data_funnyvideos_20250303_121500.csv
-│── travelvlogs/
-│   ├── tiktok_data_travelvlogs_20250305_140830.csv
-```
+## Login and CAPTCHA Handling
 
-## Code Structure
-```
-├── tiktok_scraper.py    # Main scraper logic
-├── main.py              # CLI interface for running scraper
-├── requirements.txt     # List of dependencies
-├── README.md            # Project documentation
-```
+Since TikTok has security measures in place, the login process involves a **manual CAPTCHA verification step**.
 
-## Functions
-### **`scrape_user_profile(username)`**
-Scrapes a TikTok user's profile, extracting bio, contact info, and links.
+1. The script uses **Selenium with undetected_chromedriver** to open the TikTok login page.
+2. Your email and password are automatically filled in from the `.env` file.
+3. If TikTok requires a CAPTCHA verification:
+   - The script **pauses execution** and prompts the user to solve the CAPTCHA manually.
+   - The console will display messages guiding the user.
+   - The script **continuously checks** if the CAPTCHA has been solved by monitoring URL changes.
+4. Once logged in successfully, the script proceeds to scrape data.
 
-### **`scrape_comments(post_url, max_comments=50)`**
-Extracts comments from a TikTok post, handling nested replies and parent comments.
+⚠️ **Note:** Ensure that your TikTok account is accessible and does not have additional security settings that block automated logins.
 
-### **`scrape_hashtag(hashtag, max_posts=10, batch_size=3)`**
-Scrapes TikTok posts under a given hashtag and extracts post details, comments, and user profiles.
+## Expected Outputs
 
-### **`save_to_csv(data, filename)`**
-Saves scraped data into CSV format within structured hashtag-based folders.
+1. **Video URLs List (`url_lists/{Your Hashtag}.json`)**  
+    The `url_lists` folder will contain JSON files named after hashtags. Each JSON file stores a list of video URLs related to that hashtag.
 
-## Troubleshooting
-### **Common Issues & Fixes**
-- **`selenium.common.exceptions.TimeoutException`**: Increase `WebDriverWait` time in `_init_driver()`.
-- **Scraper doesn't find elements**: TikTok updates its UI frequently. Update CSS selectors in `scrape_user_profile` and `enhanced_scrape_comments`.
-- **Headless mode issues**: Run with `headless=False` for debugging:
-  ```python
-  scraper = TikTokScraper(headless=False)
-  ```
+2. **Final Output CSV (`tiktok_scrapes/{your hashtag}/tiktok_scrape_{Your hashtag}_timestamp.csv`)**  
+   The extracted TikTok profile details are saved into the `tiktok_scrapes` directory, organized by hashtags. The CSV includes:
+   - Username
+   - Followers count
+   - Likes count
+   - Bio description
+   - Other relevant TikTok profile details
 
-## License
-This project is licensed under the MIT License.
+## Notes
 
-## Author
-Yi Sun (Aven)
+- Ensure that your TikTok account does not have additional security measures that may block automated logins.
+- Use responsibly and comply with TikTok's Terms of Service when scraping data.
+- If CAPTCHA verification appears frequently, consider using alternative login methods such as session-based authentication.
