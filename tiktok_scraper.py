@@ -2,6 +2,7 @@ import time
 import csv
 import random
 import logging
+from turtle import pos
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -15,40 +16,22 @@ import re
 from datetime import datetime
 import os
 import time
+from helper import scroll_page
+from scrape_url_lists import get_chrome_driver
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
  
 class TikTokScraper:
-    def __init__(self, headless=True):
+    def __init__(self, driver):
         """
         Initializes the TikTok scraper.
         :param headless: If True, runs Chrome in headless mode.
         """
-        self.headless = headless
-        logger.info("Initializing TikTok Scraper")
-        self.driver = self._init_driver()
+        self.driver = driver
         self.wait = WebDriverWait(self.driver, 10)
         logger.info("TikTok Scraper initialized successfully")
-
-    def _init_driver(self):
-        """
-        Initializes the Selenium WebDriver with options.
-        """
-        chrome_options = Options()
-        if self.headless:
-            chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_argument("start-maximized")
-        chrome_options.add_argument("--disable-infobars")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(90, 110)}.0.0.0 Safari/537.36")
-
-        return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
     def _extract_contact_info(self, text):
         """Extract contact information from text using regex patterns"""
@@ -89,17 +72,6 @@ class TikTokScraper:
             
         return contact_info
 
-    def _save_debug_html(self, html, prefix='debug'):
-        """Save HTML content to a file for debugging"""
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
-        filename = f"{prefix}_{timestamp}.html"
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(html)
-            logger.info(f"Saved debug HTML to {filename}")
-        except Exception as e:
-            logger.error(f"Failed to save debug HTML: {str(e)}")
-
     def scrape_user_profile(self, username):
         """
         Scrapes a user's TikTok profile for contact information
@@ -109,7 +81,7 @@ class TikTokScraper:
             profile_url = f"https://www.tiktok.com/@{username}"
             logger.debug(f"Navigating to profile URL: {profile_url}")
             self.driver.get(profile_url)
-            time.sleep(3)
+            time.sleep(1)
 
             profile_data = {
                 'username': username,
@@ -155,20 +127,25 @@ class TikTokScraper:
             logger.error(f"Error scraping profile for {username}: {str(e)}", exc_info=True)
             return None
 
-    def scrape_comments(self, post_url, max_comments=50):
+    def scrape_comments(self, post_url, max_comments=10000):
         """
         Scrapes comments from a TikTok post using updated selectors.
         Monitors URL changes while scrolling to detect navigation away from the post.
         """
         logger.info(f"Starting to scrape comments from post: {post_url}")
+        comments_data = []
+        post_url = str(post_url)
         try:
             self.driver.get(post_url)
-            time.sleep(5)  # Wait for initial load
-            
+            logger.info(f"Get the post url: {post_url}")
+            time.sleep(2)  # Wait for initial load
             original_url = self.driver.current_url
-            comments_data = []
+            logger.info(f"Original url: {original_url}")
+
             scroll_attempts = 0
-            max_scroll_attempts = 15  # Increased to allow for more scrolling
+            max_scroll_attempts = 10000  # Increased to allow for more scrolling
+            no_new_comments_count = 0
+            prev_comment_count = 0
 
             # Updated comment container selectors based on TikTok's HTML structure
             comment_container_selectors = [
@@ -232,7 +209,7 @@ class TikTokScraper:
                                     username = username_elem.text
                                 if username and username.strip():
                                     username = username.strip()
-                                    logger.info(f"Found post author: {username}")
+                                    logger.info(f"Found comments author: {username}")
                                     break
 
                         # Updated comment text selectors to handle nested levels
@@ -296,10 +273,17 @@ class TikTokScraper:
 
                 if len(comments_data) < max_comments:
                     try:
-                        # If comment section not found, try scrolling the whole page
+                        # Scroll with a larger increment and add some randomization
                         current_scroll = self.driver.execute_script("return window.pageYOffset;")
-                        self.driver.execute_script(f"window.scrollTo(0, {current_scroll + 600});")
-                        time.sleep(2)
+                        scroll_amount = random.randint(800, 1200)  # Randomize scroll amount
+                        self.driver.execute_script(f"window.scrollTo(0, {current_scroll + scroll_amount});")
+                        
+                        # Add a small random delay to seem more human-like
+                        time.sleep(random.uniform(2, 4))
+                        
+                        # Scroll up slightly to trigger potential lazy loading
+                        self.driver.execute_script(f"window.scrollTo(0, {current_scroll + scroll_amount - 100});")
+                        time.sleep(1)
                     except Exception as e:
                         logger.error(f"Error scrolling page: {str(e)}")
                 
@@ -311,6 +295,17 @@ class TikTokScraper:
                     logger.warning(f"URL changed after scrolling from {original_url} to {current_url}. Stopping comment collection.")
                     break
 
+                if prev_comment_count == len(comments_data):
+                    no_new_comments_count += 1
+                else:
+                    no_new_comments_count = 0
+                    prev_comment_count = len(comments_data)
+
+                # Increase tolerance for no new comments
+                if no_new_comments_count >= 5:
+                    logger.info("No new comments found after multiple scroll attempts. Stopping...")
+                    break
+
             logger.info(f"Finished scraping comments. Found {len(comments_data)} comments after {scroll_attempts} scroll attempts")
             return comments_data
             
@@ -318,7 +313,7 @@ class TikTokScraper:
             logger.error(f"Error scraping comments: {str(e)}")
             return comments_data
 
-    def scrape_hashtag(self, hashtag, max_posts=10, batch_size=3):
+    def scrape_hashtag(self, hashtag, video_url_list, batch_size=1, output_file=None):
         """
         Scrapes TikTok posts with a specific hashtag and their comments
         
@@ -330,150 +325,89 @@ class TikTokScraper:
         Returns:
             list: List of dictionaries containing post data, comments, and profile information
         """
-        logger.info(f"Starting to scrape hashtag: #{hashtag}, max posts: {max_posts}")
-        all_results = []
-        processed_urls = set()  # Keep track of processed URLs to avoid duplicates
+        logger.info(f"Starting to scrape hashtag: #{hashtag}")
+        processed_urls = set()
         
         try:
-            # First collect all video URLs through scrolling
-            url = f"https://www.tiktok.com/tag/{hashtag}"
-            self.driver.get(url)
-            time.sleep(5)  # Wait for initial load
-            
-            video_urls = []
-            last_height = self.driver.execute_script("return document.body.scrollHeight")
-            scroll_attempts = 0
-            max_scroll_attempts = 100  # Prevent infinite scrolling
-            
-            while len(video_urls) < max_posts and scroll_attempts < max_scroll_attempts:
-                # Find all video links on current page
-                url_selectors = [
-                    'a[href*="/video/"]',
-                    'a[data-e2e*="video-link"]',
-                    'div[class*="DivWrapper"] a'
-                ]
-                
-                for selector in url_selectors:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for elem in elements:
-                        try:
-                            video_url = elem.get_attribute('href')
-                            if video_url and video_url not in processed_urls:
-                                video_urls.append(video_url)
-                                logger.info(f"Found video URL: {video_url}, Total found: {len(video_urls)}")
-                                if len(video_urls) >= max_posts:
-                                    break
-                        except Exception as e:
-                            logger.debug(f"Error getting URL from element: {str(e)}")
-                            continue
-                    
-                    if len(video_urls) >= max_posts:
-                        break
-                
-                # Scroll down to load more videos
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)  # Wait for new content to load
-                
-                # Check if we've reached the bottom
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    scroll_attempts += 1
-                    logger.debug(f"No new content loaded, attempt {scroll_attempts}/{max_scroll_attempts}")
-                else:
-                    scroll_attempts = 0  # Reset counter if we found new content
-                last_height = new_height
-            
-            logger.info(f"Found {len(video_urls)} video URLs")
-            
             # Process videos in batches to manage memory and allow for partial success
-            for i in range(0, len(video_urls), batch_size):
-                batch = video_urls[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}, videos {i+1} to {min(i+batch_size, len(video_urls))}")
+            for i, video_url in enumerate(video_url_list):
+                video_results = []
+                try:
+                    self.driver.execute_script("return document.readyState")  # Check if the session is still active
+                except:
+                    logger.error("WebDriver session expired. Restarting driver...")
+                    self.driver.quit()
+                    self.driver = get_chrome_driver()
+                    time.sleep(3)
+
+                logger.info(f"Processing video {i+1} of {len(video_url_list)}")
                 
-                for video_url in batch:
-                    try:
-                        if video_url in processed_urls:
-                            continue
-                            
-                        logger.info(f"Processing video: {video_url}")
-                        
-                        # Get comments for this video
-                        comments = self.scrape_comments(video_url)
-                        logger.info(f"Found {len(comments)} comments")
-                        
-                        # Extract username from URL or first comment
-                        username = None
-                        if comments and len(comments) > 0:
-                            username = comments[0].get('username')
-                        
-                        # Get video author's profile if username was found
-                        author_profile = None
-                        if username:
-                            author_profile = self.scrape_user_profile(username)
-                        
-                        # Process each comment and get commenter profiles
-                        for comment in comments:
-                            commenter_username = comment['username']
-                            
-                            # Get commenter's profile information
-                            try:
-                                profile_info = self.scrape_user_profile(commenter_username)
-                            except Exception as e:
-                                logger.error(f"Error getting profile for {commenter_username}: {str(e)}")
-                                profile_info = {}
-                            
-                            # Combine all information
-                            result = {
-                                'hashtag': hashtag,
-                                'post_url': video_url,
-                                'post_author': username,
-                                # 'author_bio': author_profile.get('bio', '') if author_profile else '',
-                                # 'author_contact': {
-                                #     'email': author_profile.get('email', ''),
-                                #     'whatsapp': author_profile.get('whatsapp', ''),
-                                #     'phone': author_profile.get('phone', '')
-                                # } if author_profile else {},
-                                'commenter_username': commenter_username,
-                                'comment_text': comment['comment_text'],
-                                'comment_level': comment['comment_level'],
-                                'parent_comment': comment['parent_comment'],
-                                'commenter_bio': profile_info.get('bio', ''),
-                                'commenter_contact': {
-                                    'email': profile_info.get('email', ''),
-                                    'whatsapp': profile_info.get('whatsapp', ''),
-                                    'phone': profile_info.get('phone', '')
-                                },
-                                'commenter_links': profile_info.get('links', [])
-                            }
-                            
-                            all_results.append(result)
-                            
-                        processed_urls.add(video_url)
-                        logger.info(f"Successfully processed video: {video_url}")
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing video {video_url}: {str(e)}")
+                try:
+                    if video_url in processed_urls:
+                        logger.info(f"Skipping already processed video: {video_url}")
                         continue
+                        
+                    logger.info(f"Processing video: {video_url}")
+                    
+                    # Get comments for this video
+                    comments = self.scrape_comments(video_url)
+                    logger.info(f"Found {len(comments)} comments")
+                    
+                    # Extract username from URL or first comment
+                    username = None
+                    if comments and len(comments) > 0:
+                        username = comments[0].get('username')
+                    
+                    # Process each comment and get commenter profiles
+                    for comment in comments:
+                        commenter_username = comment['username']
+                        
+                        # Get commenter's profile information
+                        try:
+                            profile_info = self.scrape_user_profile(commenter_username)
+                        except Exception as e:
+                            logger.error(f"Error getting profile for {commenter_username}: {str(e)}")
+                            profile_info = {}
+                        
+                        # Combine all information
+                        result = {
+                            'hashtag': hashtag,
+                            'post_url': video_url,
+                            'post_author': username,
+                            'commenter_username': commenter_username,
+                            'comment_text': comment['comment_text'],
+                            'comment_level': comment['comment_level'],
+                            'parent_comment': comment['parent_comment'],
+                            'commenter_bio': profile_info.get('bio', ''),
+                            'commenter_contact': {
+                                'email': profile_info.get('email', ''),
+                                'whatsapp': profile_info.get('whatsapp', ''),
+                                'phone': profile_info.get('phone', '')
+                            },
+                            'commenter_links': profile_info.get('links', [])
+                        }
+                        
+                        video_results.append(result)
+                        
+                    processed_urls.add(video_url)
+                    logger.info(f"Successfully processed video: {video_url}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing video {video_url}: {str(e)}")
+                    continue
                 
-                # Save intermediate results after each batch
-                if all_results:
-                    self.save_to_csv(all_results, f"tiktok_data_{hashtag}_intermediate.csv")
-                    logger.info(f"Saved intermediate results, {len(all_results)} entries so far")
-            
-            logger.info(f"Finished scraping hashtag #{hashtag}. Found {len(all_results)} results")
-            return all_results
-            
+                # Save results after each batch
+                if video_results:
+                    logger.info(f"Saving results to {output_file}")
+                    self.save_to_csv(video_results, output_file)
+                    logger.info(f"Saved {len(video_results)} results so far")
         except Exception as e:
             logger.error(f"Error scraping hashtag: {str(e)}")
-            # Save any results we got before the error
-            if all_results:
-                self.save_to_csv(all_results, f"tiktok_data_{hashtag}_error_recovery.csv")
-                logger.info(f"Saved {len(all_results)} results before error")
-            return all_results
+            return 
 
     def save_to_csv(self, data, filename="tiktok_data.csv"):
         """
-        Saves scraped data to a CSV file within a structured folder.
+        Saves scraped data to a CSV file within a structured folder and appends new data.
         """
         if not data:
             logger.warning("No data to save")
@@ -499,43 +433,51 @@ class TikTokScraper:
             # Get the hashtag name from the first entry in the data
             hashtag = data[0].get('hashtag', 'unknown_hashtag')
             hashtag_folder = f"tiktok_scrapes/{hashtag}"
-            
+
             # Create the directory if it doesn't exist
             os.makedirs(hashtag_folder, exist_ok=True)
 
-            # Generate filename with timestamp
-            timestamp = time.strftime('%Y%m%d_%H%M%S')
-            filepath = os.path.join(hashtag_folder, f"tiktok_data_{hashtag}_{timestamp}.csv")
+            # Generate filename
+            filepath = os.path.join(hashtag_folder, filename)
 
-            # Flatten nested dictionaries in the data
-            flattened_data = []
-            for item in data:
-                flat_item = {
-                    'hashtag': item.get('hashtag', ''),
-                    'post_url': item.get('post_url', ''),
-                    'post_author': item.get('post_author', ''),
-                    'commenter_username': item.get('commenter_username', ''),
-                    'comment_text': item.get('comment_text', ''),
-                    'comment_level': item.get('comment_level', ''),
-                    'parent_comment': item.get('parent_comment', ''),
-                    'commenter_bio': item.get('commenter_bio', ''),
-                    'commenter_email': item.get('commenter_contact', {}).get('email', ''),
-                    'commenter_whatsapp': item.get('commenter_contact', {}).get('whatsapp', ''),
-                    'commenter_phone': item.get('commenter_contact', {}).get('phone', ''),
-                    'commenter_links': '|'.join(item.get('commenter_links', [])) if item.get('commenter_links') else ''
-                }
-                flattened_data.append(flat_item)
+            # Check if file exists to decide whether to write headers
+            file_exists = os.path.isfile(filepath)
 
-            # Save to CSV file
-            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            # Open file in append mode ('a') to keep adding new data
+            with open(filepath, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
+
+                # Write headers only if the file does not already exist
+                if not file_exists:
+                    writer.writeheader()
+
+                # Flatten nested dictionaries
+                flattened_data = []
+                for item in data:
+                    flat_item = {
+                        'hashtag': item.get('hashtag', ''),
+                        'post_url': item.get('post_url', ''),
+                        'post_author': item.get('post_author', ''),
+                        'commenter_username': item.get('commenter_username', ''),
+                        'comment_text': item.get('comment_text', ''),
+                        'comment_level': item.get('comment_level', ''),
+                        'parent_comment': item.get('parent_comment', ''),
+                        'commenter_bio': item.get('commenter_bio', ''),
+                        'commenter_email': item.get('commenter_contact', {}).get('email', ''),
+                        'commenter_whatsapp': item.get('commenter_contact', {}).get('whatsapp', ''),
+                        'commenter_phone': item.get('commenter_contact', {}).get('phone', ''),
+                        'commenter_links': '|'.join(item.get('commenter_links', [])) if item.get('commenter_links') else ''
+                    }
+                    flattened_data.append(flat_item)
+
+                # Append new data to CSV
                 writer.writerows(flattened_data)
 
-            logger.info(f"Data saved to {filepath}")
+                logger.info(f"Appended {len(flattened_data)} records to {filepath}")
 
         except Exception as e:
             logger.error(f"Error saving to CSV: {str(e)}")
+
 
     def close_driver(self):
         """
